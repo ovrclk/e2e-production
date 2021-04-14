@@ -28,10 +28,6 @@ jobs:
           wget $(curl -H "Authorization: token ${{secrets.GITHUB_TOKEN}}" -s https://api.github.com/repos/goreleaser/goreleaser/releases/latest | jq -r ".assets[] | select(.name | test(\"goreleaser_amd64.deb\")) | .browser_download_url") -O goreleaser.deb
           sudo dpkg -i goreleaser.deb
           rm goreleaser.deb
-      - name: branch name
-        id: branch_name
-        run: |
-          echo ::set-output name=GORELEASER_TAG::${GITHUB_REF#refs/tags/}
       - if: (github.ref == 'refs/heads/master')
         name: release dry-run GORELEASER_SKIP_VALIDATE=true
         run: make release-dry-run GORELEASER_SKIP_VALIDATE=true
@@ -43,3 +39,5 @@ jobs:
         run: |-
           sudo rm -rf dist
           make release
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}

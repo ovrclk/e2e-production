@@ -15,15 +15,6 @@ builds:
     ldflags:
       - "{{ .Env.LD_FLAGS }}"
       - -extldflags "--static"
-archives:
-  - id: akash
-    builds:
-      - akash-linux-amd64
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    wrap_in_directory: true
-    format: zip
-    files:
-      - none*
 
 nfpms:
   - vendor: "Overclock Labs Inc."
