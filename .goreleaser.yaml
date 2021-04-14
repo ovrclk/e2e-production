@@ -16,6 +16,9 @@ builds:
       - "{{ .Env.LD_FLAGS }}"
       - -extldflags "--static"
 
+archives:
+  - format: binary
+
 nfpms:
   - vendor: "Overclock Labs Inc."
     homepage: "https://ovrclk.com"
@@ -27,6 +30,6 @@ nfpms:
 release:
   github:
     owner: ovrclk
-    name: akash
+    name: e2e-production
   prerelease: auto
   draft: false
