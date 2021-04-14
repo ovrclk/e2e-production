@@ -3,6 +3,9 @@ name: e2e
 on:
   schedule:
     - cron: '*/15 * * * *'
+  push:
+    branches:
+      - master
 
 env:
   AKASH_HOME: /home/runner/.akash
@@ -19,20 +22,14 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
-      - uses: c-py/action-dotenv-to-setenv@v3
-        with:
-          env-file: .makerc
-      - uses: actions/setup-go@v2
-        with:
-          go-version: "${{ env.GOLANG_VERSION }}"
-      - name: build test
-        run: make e2e
       - name: installing toolset
         run: sudo apt install wget curl jq
-      - name: install akash binary
+      - name: install akash binaries
         run: |-
           wget $(curl -H "Authorization: token ${{secrets.GITHUB_TOKEN}}" -s https://api.github.com/repos/ovrclk/akash/releases/latest | jq -r ".assets[] | select(.name | test(\"linux_amd64.deb\")) | .browser_download_url") -O akash.deb
           sudo dpkg -i akash.deb
+          wget $(curl -H "Authorization: token ${{secrets.GITHUB_TOKEN}}" -s https://api.github.com/repos/ovrclk/e2e-production/releases/latest | jq -r ".assets[] | select(.name | test(\"linux_amd64.deb\")) | .browser_download_url") -O e2e.deb
+          sudo dpkg -i e2e.deb
       - name: import key
         run: |-
           echo "${{secrets.DEPLOY_KEY}}" > key.key
@@ -41,4 +38,4 @@ jobs:
       - name: import certificate
         run: echo "${{secrets.DEPLOY_CERT}}" > ${{env.AKASH_HOME}}/$(akash keys show ${{env.AKASH_FROM}} --output=json | jq -r ".address").pem
       - name: running test
-        run: ./e2e manifests/deployment.yaml --chain-id=${{env.AKASH_CHAIN_ID}} --keyring-backend=${{env.AKASH_KEYRING_BACKEND}} --home=${{env.AKASH_HOME}} --node=${{env.AKASH_NODE}} --gas=auto --from=${{env.AKASH_FROM}}
+        run: akash-e2e-production manifests/deployment.yaml --chain-id=${{env.AKASH_CHAIN_ID}} --keyring-backend=${{env.AKASH_KEYRING_BACKEND}} --home=${{env.AKASH_HOME}} --node=${{env.AKASH_NODE}} --gas=auto --from=${{env.AKASH_FROM}}
