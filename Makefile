@@ -52,7 +52,7 @@ release-dry-run:
 release:
 	BUILD_FLAGS="$(GORELEASER_FLAGS)" LD_FLAGS="$(GORELEASER_LD_FLAGS)" goreleaser \
 		-f "$(GORELEASER_CONFIG)" \
-		release
+		release \
 		--rm-dist
 
 .PHONY: clean
