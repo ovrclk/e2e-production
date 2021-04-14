@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/avast/retry-go"
-	"github.com/spf13/viper"
 	"net/http"
 	"time"
+
+	"github.com/avast/retry-go"
+	"github.com/spf13/viper"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	gateway "github.com/ovrclk/akash/provider/gateway/rest"
