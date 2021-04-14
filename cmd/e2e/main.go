@@ -142,7 +142,7 @@ func main() {
 			leasesReady := make(chan struct{}, 1)
 			bids := make(chan mtypes.EventBidCreated, 1)
 			group.Go(func() error {
-				err = ChainEmitter(
+				err := ChainEmitter(
 					ctx,
 					clientCtx,
 					DeploymentDataUpdateHandler(dd, bids, leasesReady),
@@ -159,7 +159,7 @@ func main() {
 
 			// Send the deployment creation transaction
 			group.Go(func() error {
-				if err = TxCreateDeployment(clientCtx, cmd.Flags(), dd); err != nil && !errors.Is(err, context.Canceled) {
+				if err := TxCreateDeployment(clientCtx, cmd.Flags(), dd); err != nil && !errors.Is(err, context.Canceled) {
 					log.Error("error creating deployment", "err", err)
 					cancel()
 				}
@@ -190,7 +190,7 @@ func main() {
 
 			wfb := newWaitForBids(dd, bids)
 			group.Go(func() error {
-				if err = wfb.run(ctx, cancel, clientCtx, cmd.Flags()); err != nil && !errors.Is(err, context.Canceled) {
+				if err := wfb.run(ctx, cancel, clientCtx, cmd.Flags()); err != nil && !errors.Is(err, context.Canceled) {
 					log.Error("error waiting for bids to be made", "err", err)
 					cancel()
 				}
@@ -200,7 +200,7 @@ func main() {
 			wfl := newWaitForLeases(dd, gClientDir, retryConfiguration, leasesReady)
 			// Wait for the leases to be created and then start polling the provider for service availability
 			group.Go(func() error {
-				if err = wfl.run(ctx, cancel); err != nil && !errors.Is(err, context.Canceled) {
+				if err := wfl.run(ctx, cancel); err != nil && !errors.Is(err, context.Canceled) {
 					log.Error("error waiting for services to be ready", "err", err)
 					cancel()
 				}
