@@ -1,8 +1,9 @@
 name: e2e
 
 on:
-  schedule:
-    - cron: '*/15 * * * *'
+  push:
+    branches:
+      - master
 
 env:
   AKASH_HOME: /home/runner/.akash
@@ -15,7 +16,7 @@ env:
   AKASH_FROM: e2e-production-github
   AKASH_KEYRING_BACKEND: test
 jobs:
-  e2e-production:
+  e2e-production-master:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2

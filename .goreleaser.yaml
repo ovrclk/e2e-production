@@ -1,0 +1,41 @@
+env:
+  - GO111MODULE=on
+builds:
+  - id: akash-linux-amd64
+    binary: akash-e2e-production
+    main: ./cmd/e2e
+    goarch:
+      - amd64
+    goos:
+      - linux
+    flags:
+      - "{{ .Env.BUILD_FLAGS }}"
+      - -trimpath
+      - -mod=readonly
+    ldflags:
+      - "{{ .Env.LD_FLAGS }}"
+      - -extldflags "--static"
+archives:
+  - id: akash
+    builds:
+      - akash-linux-amd64
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    wrap_in_directory: true
+    format: zip
+    files:
+      - none*
+
+nfpms:
+  - vendor: "Overclock Labs Inc."
+    homepage: "https://ovrclk.com"
+    maintainer: "Akash Network <hello@akash.network>"
+    formats:
+      - deb
+    license: Apache 2.0
+
+release:
+  github:
+    owner: ovrclk
+    name: akash
+  prerelease: auto
+  draft: false
