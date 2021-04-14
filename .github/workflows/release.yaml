@@ -24,7 +24,9 @@ jobs:
         with:
           go-version: "${{ env.GOLANG_VERSION }}"
       - name: install goreleaser
-        run: curl -sfL https://install.goreleaser.com/github.com/goreleaser/goreleaser.sh | sh
+        run: |-
+          wget $(curl -H "Authorization: token ${{secrets.GITHUB_TOKEN}}" -s https://api.github.com/repos/goreleaser/goreleaser/releases/latest | jq -r ".assets[] | select(.name | test(\"goreleaser_amd64.deb\")) | .browser_download_url") -O goreleaser.deb
+          sudo dpkg -i goreleaser.deb
       - name: branch name
         id: branch_name
         run: |
