@@ -2,10 +2,7 @@ name: e2e
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
-  push:
-    branches:
-      - master
+    - cron: '*/5 * * * *'
 
 env:
   AKASH_HOME: /home/runner/.akash

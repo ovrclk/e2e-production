@@ -5,10 +5,10 @@ GIT_HEAD_ABBREV       := $(shell git rev-parse --abbrev-ref HEAD)
 
 include .makerc
 
-BUILD_TAGS             ="osusergo,netgo,ledger,mainnet,static_build"
+BUILD_TAGS             =osusergo,netgo,ledger,mainnet,static_build
 
-ldflags = -X github.com/cosmos/cosmos-sdk/version.Name=akash \
--X github.com/cosmos/cosmos-sdk/version.AppName=akash \
+ldflags = -X github.com/cosmos/cosmos-sdk/version.Name=e2e \
+-X github.com/cosmos/cosmos-sdk/version.AppName=e2e \
 -X "github.com/cosmos/cosmos-sdk/version.BuildTags=$(BUILD_TAGS)" \
 -X github.com/cosmos/cosmos-sdk/version.Version=$(shell git describe --tags | sed 's/^v//') \
 -X github.com/cosmos/cosmos-sdk/version.Commit=$(GIT_HEAD_COMMIT_LONG)
