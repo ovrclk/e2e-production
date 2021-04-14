@@ -27,6 +27,7 @@ jobs:
         run: |-
           wget $(curl -H "Authorization: token ${{secrets.GITHUB_TOKEN}}" -s https://api.github.com/repos/goreleaser/goreleaser/releases/latest | jq -r ".assets[] | select(.name | test(\"goreleaser_amd64.deb\")) | .browser_download_url") -O goreleaser.deb
           sudo dpkg -i goreleaser.deb
+          rm goreleaser.deb
       - name: branch name
         id: branch_name
         run: |
