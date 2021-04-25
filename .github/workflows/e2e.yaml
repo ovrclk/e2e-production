@@ -15,7 +15,7 @@ env:
   AKASH_FROM: e2e-production-github
   AKASH_KEYRING_BACKEND: test
 jobs:
-  e2e-production:
+  equinix-metal-sjc1:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
@@ -35,7 +35,37 @@ jobs:
       - name: import certificate
         run: echo "${{secrets.DEPLOY_CERT}}" > ${{env.AKASH_HOME}}/$(akash keys show ${{env.AKASH_FROM}} --output=json | jq -r ".address").pem
       - name: running test
-        run: akash-e2e-production manifests/deployment.yaml --chain-id=${{env.AKASH_CHAIN_ID}} --keyring-backend=${{env.AKASH_KEYRING_BACKEND}} --home=${{env.AKASH_HOME}} --node=${{env.AKASH_NODE}} --gas=auto --from=${{env.AKASH_FROM}}
+        run: akash-e2e-production manifests/equinix-metal-sjc1.yaml --chain-id=${{env.AKASH_CHAIN_ID}} --keyring-backend=${{env.AKASH_KEYRING_BACKEND}} --home=${{env.AKASH_HOME}} --node=${{env.AKASH_NODE}} --gas=auto --from=${{env.AKASH_FROM}}
+      - uses: 8398a7/action-slack@v3
+        if: failure()
+        with:
+          status: ${{ job.status }}
+          fields: repo,action,eventName,workflow,job,took
+          mention: here
+          if_mention: failure
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+  equinix-metal-ewr1:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: installing toolset
+        run: sudo apt install wget curl jq
+      - name: install akash binaries
+        run: |-
+          wget $(curl -H "Authorization: token ${{secrets.GITHUB_TOKEN}}" -s https://api.github.com/repos/ovrclk/akash/releases/latest | jq -r ".assets[] | select(.name | test(\"linux_amd64.deb\")) | .browser_download_url") -O akash.deb
+          sudo dpkg -i akash.deb
+          wget $(curl -H "Authorization: token ${{secrets.GITHUB_TOKEN}}" -s https://api.github.com/repos/ovrclk/e2e-production/releases/latest | jq -r ".assets[] | select(.name | test(\"linux_amd64.deb\")) | .browser_download_url") -O e2e.deb
+          sudo dpkg -i e2e.deb
+      - name: import key
+        run: |-
+          echo "${{secrets.DEPLOY_KEY}}" > key.key
+          echo "${{secrets.DEPLOY_TOKEN}}" | akash keys import ${{env.AKASH_FROM}} key.key
+          rm key.key
+      - name: import certificate
+        run: echo "${{secrets.DEPLOY_CERT}}" > ${{env.AKASH_HOME}}/$(akash keys show ${{env.AKASH_FROM}} --output=json | jq -r ".address").pem
+      - name: running test
+        run: akash-e2e-production manifests/equinix-metal-ewr1.yaml --chain-id=${{env.AKASH_CHAIN_ID}} --keyring-backend=${{env.AKASH_KEYRING_BACKEND}} --home=${{env.AKASH_HOME}} --node=${{env.AKASH_NODE}} --gas=auto --from=${{env.AKASH_FROM}}
       - uses: 8398a7/action-slack@v3
         if: failure()
         with:

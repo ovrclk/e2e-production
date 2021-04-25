@@ -19,17 +19,6 @@ profiles:
         storage:
           size: 512Mi
   placement:
-    ewr1-provider0:
-      attributes:
-        host: akash
-        datacenter: equinix-metal-ewr1
-      signedBy:
-        anyOf:
-          - akash1365yvmc4s7awdyj3n2sav7xfx76adc6dnmlx63
-      pricing:
-        web:
-          denom: uakt
-          amount: 100
     sjc1-provider0:
       attributes:
         host: akash
@@ -43,9 +32,6 @@ profiles:
           amount: 100
 deployment:
   web:
-    ewr1-provider0:
-      profile: web
-      count: 1
     sjc1-provider0:
       profile: web
       count: 1
