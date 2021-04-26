@@ -143,10 +143,23 @@ loop:
 			BidID: winningBid.ID,
 		})
 	}
-	_, err := SendMsgs(clientCtx, flags, mcr)
+	resp, err := SendMsgs(clientCtx, flags, mcr)
 	if err != nil {
 		return err
 	}
+
+	log := logger.With(
+		"hash", resp.TxHash,
+		"code", resp.Code,
+		"codespace", resp.Codespace,
+		"action", "create-lease(s)",
+	)
+
+	for i, m := range mcr {
+		log = log.With(fmt.Sprintf("lid%d", i), m.(*mtypes.MsgCreateLease).BidID.LeaseID())
+	}
+
+	log.Info("tx sent successfully")
 
 	return nil
 }
