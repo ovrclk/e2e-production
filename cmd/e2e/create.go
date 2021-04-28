@@ -108,7 +108,7 @@ loop:
 
 		case <-ctx.Done():
 			cancel()
-			return context.Canceled
+			return ctx.Err()
 		case <-ticker.C:
 			logger.Info("Done waiting on bids", "qty", len(allBids))
 			break loop
@@ -211,7 +211,7 @@ func (wfl *waitForLeases) run(ctx context.Context, cancel context.CancelFunc) er
 
 	case <-ctx.Done():
 		cancel()
-		return context.Canceled
+		return ctx.Err()
 	}
 
 	leases := wfl.dd.Leases()
