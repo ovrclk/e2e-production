@@ -46,7 +46,7 @@ jobs:
           akash query deployment list --owner "$(akash keys show "${{env.AKASH_FROM}}" -a)" --state active -o json --limit 1000 | \
             jq -r '.deployments[].deployment|select(.state == "active")|.deployment_id.dseq' | \
               while read dseq; do
-                akash tx deployment close --from "${{env.AKASH_FROM}}" --dseq "$dseq" --broadcast-mode block --yes
+                akash tx deployment close --from "${{env.AKASH_FROM}}" --dseq "$dseq" --broadcast-mode sync --yes
               done
       - name: running test
         run: ./e2e manifests/deployment.yaml --chain-id=${{env.AKASH_CHAIN_ID}} --keyring-backend=${{env.AKASH_KEYRING_BACKEND}} --home=${{env.AKASH_HOME}} --node=${{env.AKASH_NODE}} --gas=auto --from=${{env.AKASH_FROM}}
