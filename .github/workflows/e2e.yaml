@@ -34,6 +34,13 @@ jobs:
           rm key.key
       - name: import certificate
         run: echo "${{secrets.DEPLOY_CERT}}" > ${{env.AKASH_HOME}}/$(akash keys show ${{env.AKASH_FROM}} --output=json | jq -r ".address").pem
+      - name: close all active deployments
+        run: |-
+          akash query deployment list --owner "$(akash keys show "${{env.AKASH_FROM}}" -a)" --state active -o json --limit 1000 | \
+            jq -r '.deployments[].deployment|select(.state == "active")|.deployment_id.dseq' | \
+              while read dseq; do
+                akash tx deployment close --from "${{env.AKASH_FROM}}" --dseq "$dseq" --broadcast-mode sync --yes
+              done
       - name: running test
         run: akash-e2e-production manifests/deployment.yaml --chain-id=${{env.AKASH_CHAIN_ID}} --keyring-backend=${{env.AKASH_KEYRING_BACKEND}} --home=${{env.AKASH_HOME}} --node=${{env.AKASH_NODE}} --gas=auto --from=${{env.AKASH_FROM}}
       - uses: 8398a7/action-slack@v3
