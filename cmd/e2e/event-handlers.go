@@ -134,7 +134,7 @@ func DeploymentDataUpdateHandler(dd *DeploymentData, bids chan<- mtypes.EventBid
 		// Handle Bid creation events
 		case mtypes.EventBidCreated:
 			if addr == event.ID.Owner && event.ID.DSeq == dd.DeploymentID.DSeq {
-				log.Info("bid for order created", "oseq", event.ID.OSeq, "price", event.Price)
+				log.Info("bid for order created", "oseq", event.ID.OSeq, "provider", event.ID.Provider, "price", event.Price)
 				bids <- event
 			}
 			return
@@ -142,7 +142,7 @@ func DeploymentDataUpdateHandler(dd *DeploymentData, bids chan<- mtypes.EventBid
 		// Handle Bid close events
 		case mtypes.EventBidClosed:
 			if addr == event.ID.Owner && event.ID.DSeq == dd.DeploymentID.DSeq {
-				log.Info("bid for order closed", "oseq", event.ID.OSeq, "price", event.Price)
+				log.Info("bid for order closed", "oseq", event.ID.OSeq, "provider", event.ID.Provider, "price", event.Price)
 			}
 			return
 
@@ -159,7 +159,7 @@ func DeploymentDataUpdateHandler(dd *DeploymentData, bids chan<- mtypes.EventBid
 					}
 				}
 
-				log.Info("lease for order created", "oseq", event.ID.OSeq, "price", event.Price)
+				log.Info("lease for order created", "oseq", event.ID.OSeq, "provider", event.ID.Provider, "price", event.Price)
 			}
 			return
 
