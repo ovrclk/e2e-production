@@ -6,7 +6,7 @@ on:
 
 env:
   AKASH_HOME: /home/runner/.akash
-  AKASH_NODE: tcp://rpc0.mainnet.akash.network:26657
+  AKASH_NODE: ${{secrets.AKASH_NODE}}
   AKASH_GAS: auto
   AKASH_GAS_ADJUSTMENT: 1.15
   AKASH_GAS_PRICES: 0.025uakt
