@@ -125,7 +125,7 @@ func main() {
 				return err
 			}
 
-			gClientDir, err := gateway.NewClientDirectory(clientCtx)
+			gClientDir, err := gateway.NewClientDirectory(cmd.Context(), clientCtx)
 			if err != nil {
 				return err
 			}
