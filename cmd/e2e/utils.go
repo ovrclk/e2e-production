@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/tx"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -8,7 +10,7 @@ import (
 )
 
 // SendMsgs sends given sdk messages
-func SendMsgs(clientCtx client.Context, flags *pflag.FlagSet, datagrams []sdk.Msg) (res *sdk.TxResponse, err error) {
+func SendMsgs(ctx context.Context, cctx client.Context, flags *pflag.FlagSet, datagrams []sdk.Msg) (res *sdk.TxResponse, err error) {
 	// validate basic all the msgs
 	for _, msg := range datagrams {
 		if err := msg.ValidateBasic(); err != nil {
@@ -16,7 +18,7 @@ func SendMsgs(clientCtx client.Context, flags *pflag.FlagSet, datagrams []sdk.Ms
 		}
 	}
 
-	return BuildAndBroadcastTx(clientCtx, flags, datagrams)
+	return BuildAndBroadcastTx(cctx, flags, datagrams)
 }
 
 // BuildAndBroadcastTx takes messages and builds, signs and marshals a sdk.Tx to prepare it for broadcast
@@ -63,5 +65,5 @@ func BuildAndBroadcastTx(clientCtx client.Context, flags *pflag.FlagSet, msgs []
 		return nil, err
 	}
 
-	return clientCtx.BroadcastTxSync(txBytes)
+	return clientCtx.BroadcastTx(txBytes)
 }

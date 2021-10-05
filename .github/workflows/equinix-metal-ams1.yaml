@@ -1,0 +1,38 @@
+name: equinix-metal-ams1
+
+on:
+#  push:
+#    branches:
+#      - master
+  schedule:
+    - cron: '*/5 * * * *'
+
+env:
+  AKASH_NODE: ${{secrets.AKASH_NODE}}
+  AKASH_CHAIN_ID: akashnet-2
+  AKASH_FROM: tenant-equinix-metal-ams1
+jobs:
+  equinix-metal-ams1:
+    runs-on: ubuntu-20.04
+    container:
+      image: ghcr.io/ovrclk/e2e-production
+      credentials:
+        username: ${{ secrets.GHCR_USER }}
+        password: ${{ secrets.GHCR_TOKEN }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: running test
+        run: e2e manifests/equinix-metal-ams1.yaml
+        env:
+          E2E_NODE: ${{env.AKASH_NODE}}
+          E2E_CHAIN_ID: ${{env.AKASH_CHAIN_ID}}
+          E2E_FROM: ${{env.AKASH_FROM}}
+      - uses: 8398a7/action-slack@v3
+        if: failure()
+        with:
+          status: ${{ job.status }}
+          fields: repo,action,eventName,workflow,job,took
+          mention: here
+          if_mention: failure
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

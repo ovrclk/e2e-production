@@ -1,0 +1,44 @@
+name: equinix-metal-sjc1
+
+on:
+#  push:
+#    branches:
+#      - master
+  schedule:
+    - cron: '*/5 * * * *'
+
+env:
+  AKASH_HOME: /home/runner/.akash
+  AKASH_NODE: ${{secrets.AKASH_NODE}}
+  AKASH_GAS: auto
+  AKASH_GAS_ADJUSTMENT: 1.15
+  AKASH_GAS_PRICES: 0.025uakt
+  AKASH_SIGN_MODE: amino-json
+  AKASH_CHAIN_ID: akashnet-2
+  AKASH_FROM: tenant-equinix-metal-sjc1
+  AKASH_KEYRING_BACKEND: test
+jobs:
+  equinix-metal-ewr1:
+    runs-on: ubuntu-20.04
+    container:
+      image: ghcr.io/ovrclk/e2e-production
+      credentials:
+        username: ${{ secrets.GHCR_USER }}
+        password: ${{ secrets.GHCR_TOKEN }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: running test
+        run: e2e manifests/equinix-metal-sjc1.yaml
+        env:
+          E2E_NODE: ${{env.AKASH_NODE}}
+          E2E_CHAIN_ID: ${{env.AKASH_CHAIN_ID}}
+          E2E_FROM: ${{env.AKASH_FROM}}
+      - uses: 8398a7/action-slack@v3
+        if: failure()
+        with:
+          status: ${{ job.status }}
+          fields: repo,action,eventName,workflow,job,took
+          mention: here
+          if_mention: failure
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

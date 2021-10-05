@@ -11,6 +11,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/server"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	"github.com/ovrclk/akash/app"
 	"github.com/ovrclk/akash/cmd/common"
@@ -19,6 +20,7 @@ import (
 	"github.com/ovrclk/akash/sdkutil"
 	cutils "github.com/ovrclk/akash/x/cert/utils"
 	dcli "github.com/ovrclk/akash/x/deployment/client/cli"
+	dtypes "github.com/ovrclk/akash/x/deployment/types"
 	mtypes "github.com/ovrclk/akash/x/market/types"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -51,7 +53,7 @@ func Execute(rootCmd *cobra.Command) error {
 	rootCmd.PersistentFlags().String(flags.FlagLogLevel, zerolog.InfoLevel.String(), "The logging level (trace|debug|info|warn|error|fatal|panic)")
 	rootCmd.PersistentFlags().String(flags.FlagLogFormat, tmcfg.LogFormatPlain, "The logging format (json|plain)")
 
-	executor := tmcli.PrepareBaseCmd(rootCmd, "AKASH", app.DefaultHome)
+	executor := tmcli.PrepareBaseCmd(rootCmd, "E2E", app.DefaultHome)
 	return executor.ExecuteContext(ctx)
 }
 
@@ -111,32 +113,64 @@ func main() {
 				retry.Context(ctx),
 			}
 
-			clientCtx, err := client.GetClientTxContext(cmd)
+			cctx, err := client.GetClientTxContext(cmd)
 			if err != nil {
 				return err
 			}
 
-			if _, err = cutils.LoadAndQueryPEMForAccount(cmd.Context(), clientCtx, clientCtx.Keyring); err != nil {
+			cctx = cctx.WithBroadcastMode("block")
+
+			if _, err = cutils.LoadAndQueryPEMForAccount(cmd.Context(), cctx, cctx.Keyring); err != nil {
 				if os.IsNotExist(err) {
 					err = errors.Errorf("no certificate file found for account %q.\n"+
-						"consider creating it as certificate required to create a deployment", clientCtx.FromAddress.String())
+						"consider creating it as certificate required to create a deployment", cctx.FromAddress.String())
 				}
 
 				return err
 			}
 
-			gClientDir, err := gateway.NewClientDirectory(cmd.Context(), clientCtx)
+			log := logger.With("cli", "cleanup")
+
+			qClient := dtypes.NewQueryClient(cctx)
+
+			params := &dtypes.QueryDeploymentsRequest{
+				Filters: dtypes.DeploymentFilters{
+					Owner: cctx.FromAddress.String(),
+					State: "active",
+				},
+			}
+
+			res, err := qClient.Deployments(ctx, params)
+			if err != nil {
+				log.Error("fetching dangling deployments", "error", err.Error())
+			} else if len(res.Deployments) > 0 {
+				var msgs []sdk.Msg
+				for _, d := range res.Deployments {
+					log.Info("closing dangling deployment", "dseq", d.Deployment.DeploymentID.DSeq)
+
+					msgs = append(msgs, &dtypes.MsgCloseDeployment{
+						ID: d.Deployment.DeploymentID,
+					})
+				}
+
+				if _, e := SendMsgs(ctx, cctx, cmd.Flags(), msgs); e != nil {
+					log.Error("closing deployments", "error", e.Error())
+				}
+			}
+
+			group, ctx := errgroup.WithContext(ctx)
+
+			gClientDir, err := gateway.NewClientDirectory(ctx, cctx)
 			if err != nil {
 				return err
 			}
 
-			log := logger.With("cli", "create")
-			dd, err := NewDeploymentData(args[0], cmd.Flags(), clientCtx)
+			log = logger.With("cli", "create")
+
+			dd, err := NewDeploymentData(args[0], cmd.Flags(), cctx)
 			if err != nil {
 				return err
 			}
-
-			group, _ := errgroup.WithContext(ctx)
 
 			// Listen to on chain events and send the manifest when required
 			leasesReady := make(chan struct{}, 1)
@@ -144,9 +178,9 @@ func main() {
 			group.Go(func() error {
 				err := ChainEmitter(
 					ctx,
-					clientCtx,
+					cctx,
 					DeploymentDataUpdateHandler(dd, bids, leasesReady),
-					SendManifestHandler(clientCtx, dd, gClientDir, retryConfiguration))
+					SendManifestHandler(cctx, dd, gClientDir, retryConfiguration))
 				if err != nil && !errors.Is(err, context.Canceled) {
 					log.Error("error watching events", "err", err)
 					cancel()
@@ -159,8 +193,8 @@ func main() {
 
 			// Send the deployment creation transaction
 			group.Go(func() error {
-				if err := TxCreateDeployment(clientCtx, cmd.Flags(), dd); err != nil && !errors.Is(err, context.Canceled) {
-					log.Error("error creating deployment", "err", err)
+				err := TxCreateDeployment(ctx, cctx, cmd.Flags(), dd)
+				if err != nil {
 					cancel()
 				}
 
@@ -170,10 +204,14 @@ func main() {
 
 			defer func() {
 				depTeardown <- struct{}{}
-				<- depCreated
+				<-depCreated
 			}()
 
 			go func() {
+				defer func() {
+					depCreated <- nil
+				}()
+
 				if e := <-depCreated; e != nil {
 					return
 				}
@@ -181,16 +219,16 @@ func main() {
 				<-depTeardown
 
 				log.Info("closing deployment", "dseq", dd.DeploymentID)
-				if e := TxCloseDeployment(clientCtx, cmd.Flags(), dd); e != nil {
+				if e := TxCloseDeployment(ctx, cctx, cmd.Flags(), dd.DeploymentID); e != nil {
 					log.Error("closing deployment", "dseq", dd.DeploymentID, "err", e)
 				}
-
-				depCreated <- nil
 			}()
 
-			wfb := newWaitForBids(dd, bids)
 			group.Go(func() error {
-				if err := wfb.run(ctx, cancel, clientCtx, cmd.Flags()); err != nil && !errors.Is(err, context.Canceled) {
+				wfb := newWaitForBids(dd, bids)
+
+				err := wfb.run(ctx, cancel, cctx, cmd.Flags())
+				if err != nil && !errors.Is(err, context.Canceled) {
 					log.Error("error waiting for bids to be made", "err", err)
 					cancel()
 				}
@@ -200,7 +238,8 @@ func main() {
 			wfl := newWaitForLeases(dd, gClientDir, retryConfiguration, leasesReady)
 			// Wait for the leases to be created and then start polling the provider for service availability
 			group.Go(func() error {
-				if err := wfl.run(ctx, cancel); err != nil && !errors.Is(err, context.Canceled) {
+				err := wfl.run(ctx, cancel)
+				if err != nil && !errors.Is(err, context.Canceled) {
 					log.Error("error waiting for services to be ready", "err", err)
 					cancel()
 				}
@@ -209,7 +248,6 @@ func main() {
 
 			// This returns "context cancelled" when everything goes OK
 			err = group.Wait()
-			cancel()
 			if err != nil && errors.Is(err, context.Canceled) && wfl.allLeasesOk {
 				err = nil // Not an actual error to stop on
 			}
@@ -217,6 +255,13 @@ func main() {
 			if err != nil {
 				return err
 			}
+
+			// wtf
+			if !wfl.allLeasesOk {
+				return errors.New("timed out waiting for leases")
+			}
+
+			cancel()
 
 			// Reset the context
 			ctx, cancel2 := context.WithDeadline(cmd.Context(), time.Now().Add(timeoutDuration))
@@ -249,7 +294,7 @@ func main() {
 			})
 			cancel2()
 
-			if errors.Is(err, context.Canceled) {
+			if errors.Is(err, context.DeadlineExceeded) {
 				return errDeployTimeout
 			}
 
@@ -280,6 +325,4 @@ func main() {
 			os.Exit(1)
 		}
 	}
-
-	// cmd.AddCommand(createCmd())
 }

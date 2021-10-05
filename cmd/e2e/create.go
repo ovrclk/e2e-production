@@ -80,7 +80,7 @@ func (bl bidList) Swap(i, j int) {
 	bl[i], bl[j] = bl[j], bl[i]
 }
 
-func (wfb *waitForBids) run(ctx context.Context, cancel context.CancelFunc, clientCtx client.Context, flags *pflag.FlagSet) error {
+func (wfb *waitForBids) run(ctx context.Context, cancel context.CancelFunc, cctx client.Context, flags *pflag.FlagSet) error {
 	allBids := make(map[uint32]bidList)
 
 	tickerStarted := false
@@ -143,7 +143,7 @@ loop:
 			BidID: winningBid.ID,
 		})
 	}
-	resp, err := SendMsgs(clientCtx, flags, mcr)
+	resp, err := SendMsgs(ctx, cctx, flags, mcr)
 	if err != nil {
 		return err
 	}
@@ -330,14 +330,21 @@ func (wfl *waitForLeases) run(ctx context.Context, cancel context.CancelFunc) er
 }
 
 // TxCreateDeployment takes DeploymentData and creates the specified deployment
-func TxCreateDeployment(clientCtx client.Context, flags *pflag.FlagSet, dd *DeploymentData) (err error) {
-	res, err := SendMsgs(clientCtx, flags, []sdk.Msg{dd.MsgCreate()})
+func TxCreateDeployment(ctx context.Context, cctx client.Context, flags *pflag.FlagSet, dd *DeploymentData) (err error) {
 	log := logger.With(
 		"msg", "create-deployment",
 	)
 
-	if err != nil || res == nil || res.Code != 0 {
-		log.Error("tx failed")
+	log.Info("creating")
+
+	res, err := SendMsgs(ctx, cctx, flags, []sdk.Msg{dd.MsgCreate()})
+
+	if res != nil && res.Code != 0 {
+		err = errors.New(res.RawLog)
+	}
+
+	if err != nil {
+		log.Error("tx failed", "error", err.Error())
 		return err
 	}
 
@@ -354,14 +361,21 @@ func TxCreateDeployment(clientCtx client.Context, flags *pflag.FlagSet, dd *Depl
 }
 
 // TxCloseDeployment takes DeploymentData and closes the specified deployment
-func TxCloseDeployment(clientCtx client.Context, flags *pflag.FlagSet, dd *DeploymentData) (err error) {
-	res, err := SendMsgs(clientCtx, flags, []sdk.Msg{dd.MsgClose()})
+func TxCloseDeployment(ctx context.Context, cctx client.Context, flags *pflag.FlagSet, did dtypes.DeploymentID) (err error) {
+	res, err := SendMsgs(ctx, cctx, flags, []sdk.Msg{
+		&dtypes.MsgCloseDeployment{
+			ID: did,
+		}})
 	log := logger.With(
 		"msg", "close-deployment",
 	)
 
-	if err != nil || res == nil || res.Code != 0 {
-		log.Error("tx failed")
+	if res != nil && res.Code != 0 {
+		err = errors.New(res.RawLog)
+	}
+
+	if err != nil {
+		log.Error("tx failed", "error", err.Error())
 		return err
 	}
 
@@ -370,7 +384,7 @@ func TxCloseDeployment(clientCtx client.Context, flags *pflag.FlagSet, dd *Deplo
 		"code", res.Code,
 		"codespace", res.Codespace,
 		"action", "close-deployment",
-		"dseq", dd.DeploymentID.DSeq,
+		"dseq", did.DSeq,
 	)
 
 	log.Info("tx sent successfully")
