@@ -11,6 +11,7 @@ import (
 
 	dtypes "github.com/ovrclk/akash/x/deployment/types"
 	mtypes "github.com/ovrclk/akash/x/market/types"
+	"github.com/tendermint/tendermint/libs/log"
 
 	"github.com/avast/retry-go"
 	"github.com/cosmos/cosmos-sdk/client"
@@ -80,7 +81,7 @@ func (bl bidList) Swap(i, j int) {
 	bl[i], bl[j] = bl[j], bl[i]
 }
 
-func (wfb *waitForBids) run(ctx context.Context, cancel context.CancelFunc, cctx client.Context, flags *pflag.FlagSet) error {
+func (wfb *waitForBids) run(ctx context.Context, cctx client.Context, flags *pflag.FlagSet) error {
 	allBids := make(map[uint32]bidList)
 
 	tickerStarted := false
@@ -107,7 +108,6 @@ loop:
 			}
 
 		case <-ctx.Done():
-			cancel()
 			return ctx.Err()
 		case <-ticker.C:
 			logger.Info("Done waiting on bids", "qty", len(allBids))
@@ -143,34 +143,22 @@ loop:
 			BidID: winningBid.ID,
 		})
 	}
-	resp, err := SendMsgs(ctx, cctx, flags, mcr)
+	err := SendMsgs(ctx, cctx, flags, mcr)
 	if err != nil {
 		return err
 	}
-
-	log := logger.With(
-		"hash", resp.TxHash,
-		"code", resp.Code,
-		"codespace", resp.Codespace,
-		"action", "create-lease(s)",
-	)
-
-	for i, m := range mcr {
-		log = log.With(fmt.Sprintf("lid%d", i), m.(*mtypes.MsgCreateLease).BidID.LeaseID())
-	}
-
-	log.Info("tx sent successfully")
 
 	return nil
 }
 
 func newWaitForLeases(dd *DeploymentData, gClientDir *gateway.ClientDirectory, retryConfiguration []retry.Option, leasesReady <-chan struct{}) *waitForLeases {
 	return &waitForLeases{
+		log:                logger.With("cli", "lease checker"),
 		dd:                 dd,
 		gClientDir:         gClientDir,
 		leasesReady:        leasesReady,
+		done:               make(chan error, 1),
 		retryConfiguration: retryConfiguration,
-		allLeasesOk:        false,
 	}
 }
 
@@ -180,11 +168,12 @@ type leaseAndService struct {
 }
 
 type waitForLeases struct {
+	log                log.Logger
 	dd                 *DeploymentData
 	gClientDir         *gateway.ClientDirectory
 	leasesReady        <-chan struct{}
+	done               chan error
 	retryConfiguration []retry.Option
-	allLeasesOk        bool
 	services           []leaseAndService
 	lock               sync.Mutex
 }
@@ -202,20 +191,29 @@ func (wfl *waitForLeases) eachService(fn func(leaseID mtypes.LeaseID, serviceNam
 var errLeaseNotReady = errors.New("lease not ready")
 
 // WaitForLeasesAndPollService waits for leases
-func (wfl *waitForLeases) run(ctx context.Context, cancel context.CancelFunc) error {
-	log := logger
+func (wfl *waitForLeases) run(ctx context.Context) {
+	var err error
+
+	defer func() {
+		if err != nil {
+			wfl.log.Error("Waiting on leases to be ready", "error", err.Error())
+		} else {
+			wfl.log.Info("All leases are ready")
+		}
+
+		wfl.done <- err
+	}()
 
 	// Wait for signal that expected leases exist
 	select {
 	case <-wfl.leasesReady:
-
 	case <-ctx.Done():
-		cancel()
-		return ctx.Err()
+		err = ctx.Err()
+		return
 	}
 
 	leases := wfl.dd.Leases()
-	log.Info("Waiting on leases to be ready", "leaseQuantity", len(leases))
+	wfl.log.Info("Waiting on leases to be ready", "leaseQuantity", len(leases))
 
 	var localRetryConfiguration []retry.Option
 	localRetryConfiguration = append(localRetryConfiguration, wfl.retryConfiguration...)
@@ -233,160 +231,103 @@ func (wfl *waitForLeases) run(ctx context.Context, cancel context.CancelFunc) er
 	}
 	localRetryConfiguration = append(localRetryConfiguration, retry.RetryIf(retryIf))
 
-	leaseChecker := func(leaseID mtypes.LeaseID) (func() error, error) {
-		log.Debug("Checking status of lease", "lease", leaseID)
+	checks := make([]func() error, 0, len(leases))
 
-		gclient, err := wfl.gClientDir.GetClientFromBech32(leaseID.GetProvider())
+	for _, leaseID := range leases {
+		var fn func() error
+
+		fn, err = wfl.leaseChecker(ctx, leaseID, localRetryConfiguration...)
 		if err != nil {
-			cancel()
-			return nil, err
+			return
 		}
 
-		servicesChecked := make(map[string]bool)
-
-		return func() error {
-			err = retry.Do(func() error {
-				ls, err := gclient.LeaseStatus(ctx, leaseID)
-
-				if err != nil {
-					log.Debug("Could not get lease status", "lease", leaseID, "err", err)
-					return err
-				}
-
-				for serviceName, s := range ls.Services {
-					checked := servicesChecked[serviceName]
-					if checked {
-						continue
-					}
-					isOk := s.Available == s.Total
-					if !isOk {
-						err = fmt.Errorf("%w: service %q has %d / %d available", errLeaseNotReady, serviceName, s.Available, s.Total)
-						log.Debug(err.Error())
-
-						return err
-					}
-
-					for _, u := range s.URIs {
-						req, err := http.NewRequest("GET", "http://"+u, nil)
-						if err != nil {
-							log.Debug(err.Error())
-							return err
-						}
-
-						req = req.WithContext(ctx)
-
-						res, err := http.DefaultClient.Do(req)
-						if err != nil {
-							log.Debug(err.Error())
-							return err
-						}
-
-						if res.StatusCode != http.StatusOK {
-							err = fmt.Errorf("service's http endpoint returned error: %s", res.Status)
-							log.Debug(err.Error())
-							return httpStatus(res.StatusCode)
-						}
-					}
-					servicesChecked[serviceName] = true
-					log.Info("service ready", "lease", leaseID, "service", serviceName)
-				}
-
-				// Update the shared data
-				wfl.lock.Lock()
-				defer wfl.lock.Unlock()
-				for serviceName := range ls.Services {
-					wfl.services = append(wfl.services, leaseAndService{
-						leaseID:     leaseID,
-						serviceName: serviceName,
-					})
-				}
-				return nil
-			}, localRetryConfiguration...)
-			if err != nil {
-				return err
-			}
-
-			log.Info("lease ready", "leaseID", leaseID)
-			return nil
-		}, nil
+		checks = append(checks, fn)
 	}
 
 	group, _ := errgroup.WithContext(ctx)
 
-	for _, leaseID := range leases {
-		fn, err := leaseChecker(leaseID)
-		if err != nil {
-			return err
-		}
+	for _, fn := range checks {
 		group.Go(fn)
 	}
 
-	err := group.Wait()
-	if err == nil { // If all return without error, then all leases are ready
-		wfl.allLeasesOk = true
-	}
-	cancel()
-	return nil
+	err = group.Wait()
+
+	return
 }
 
-// TxCreateDeployment takes DeploymentData and creates the specified deployment
-func TxCreateDeployment(ctx context.Context, cctx client.Context, flags *pflag.FlagSet, dd *DeploymentData) (err error) {
-	log := logger.With(
-		"msg", "create-deployment",
-	)
+func (wfl *waitForLeases) leaseChecker(ctx context.Context, leaseID mtypes.LeaseID, retryOpts ...retry.Option) (func() error, error) {
+	wfl.log.Debug("Checking status of lease", "lease", leaseID)
 
-	log.Info("creating")
-
-	res, err := SendMsgs(ctx, cctx, flags, []sdk.Msg{dd.MsgCreate()})
-
-	if res != nil && res.Code != 0 {
-		err = errors.New(res.RawLog)
-	}
-
+	gclient, err := wfl.gClientDir.GetClientFromBech32(leaseID.GetProvider())
 	if err != nil {
-		log.Error("tx failed", "error", err.Error())
-		return err
+		return nil, err
 	}
 
-	log = logger.With(
-		"hash", res.TxHash,
-		"code", res.Code,
-		"codespace", res.Codespace,
-		"action", "create-deployment",
-		"dseq", dd.DeploymentID.DSeq,
-	)
+	servicesChecked := make(map[string]bool)
 
-	log.Info("tx sent successfully")
-	return nil
-}
+	return func() error {
+		err = retry.Do(func() error {
+			ls, err := gclient.LeaseStatus(ctx, leaseID)
 
-// TxCloseDeployment takes DeploymentData and closes the specified deployment
-func TxCloseDeployment(ctx context.Context, cctx client.Context, flags *pflag.FlagSet, did dtypes.DeploymentID) (err error) {
-	res, err := SendMsgs(ctx, cctx, flags, []sdk.Msg{
-		&dtypes.MsgCloseDeployment{
-			ID: did,
-		}})
-	log := logger.With(
-		"msg", "close-deployment",
-	)
+			if err != nil {
+				wfl.log.Debug("Could not get lease status", "lease", leaseID, "err", err)
+				return err
+			}
 
-	if res != nil && res.Code != 0 {
-		err = errors.New(res.RawLog)
-	}
+			for serviceName, s := range ls.Services {
+				checked := servicesChecked[serviceName]
+				if checked {
+					continue
+				}
+				isOk := s.Available == s.Total
+				if !isOk {
+					err = fmt.Errorf("%w: service %q has %d / %d available", errLeaseNotReady, serviceName, s.Available, s.Total)
+					wfl.log.Debug(err.Error())
 
-	if err != nil {
-		log.Error("tx failed", "error", err.Error())
-		return err
-	}
+					return err
+				}
 
-	log = logger.With(
-		"hash", res.TxHash,
-		"code", res.Code,
-		"codespace", res.Codespace,
-		"action", "close-deployment",
-		"dseq", did.DSeq,
-	)
+				for _, u := range s.URIs {
+					req, err := http.NewRequest("GET", "http://"+u, nil)
+					if err != nil {
+						wfl.log.Debug(err.Error())
+						return err
+					}
 
-	log.Info("tx sent successfully")
-	return nil
+					req = req.WithContext(ctx)
+
+					res, err := http.DefaultClient.Do(req)
+					if err != nil {
+						wfl.log.Debug(err.Error())
+						return err
+					}
+
+					if res.StatusCode != http.StatusOK {
+						err = fmt.Errorf("service's http endpoint returned error: %s", res.Status)
+						wfl.log.Debug(err.Error())
+						return httpStatus(res.StatusCode)
+					}
+				}
+				servicesChecked[serviceName] = true
+				wfl.log.Info("service ready", "lease", leaseID, "service", serviceName)
+			}
+
+			// Update the shared data
+			wfl.lock.Lock()
+			defer wfl.lock.Unlock()
+			for serviceName := range ls.Services {
+				wfl.services = append(wfl.services, leaseAndService{
+					leaseID:     leaseID,
+					serviceName: serviceName,
+				})
+			}
+			return nil
+		}, retryOpts...)
+		if err != nil {
+			return err
+		}
+
+		wfl.log.Info("lease ready", "leaseID", leaseID)
+		return nil
+	}, nil
 }

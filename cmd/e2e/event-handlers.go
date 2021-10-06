@@ -101,8 +101,6 @@ func DeploymentDataUpdateHandler(dd *DeploymentData, bids chan<- mtypes.EventBid
 		case dtypes.EventDeploymentClosed:
 			if event.ID.Equals(dd.DeploymentID) {
 				log.Error("deployment closed unexpectedly")
-
-				// TODO - exit here
 				return fmt.Errorf("%w: deployment closed", errUnexpectedEvent)
 			}
 			return
@@ -110,7 +108,6 @@ func DeploymentDataUpdateHandler(dd *DeploymentData, bids chan<- mtypes.EventBid
 		// Handle deployment group close events
 		case dtypes.EventGroupClosed:
 			if event.ID.Owner == addr && event.ID.DSeq == dd.DeploymentID.DSeq {
-				// TODO: Maybe more housekeeping here?
 				log.Info("deployment group closed")
 			}
 			return

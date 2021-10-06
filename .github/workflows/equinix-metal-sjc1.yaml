@@ -18,7 +18,7 @@ env:
   AKASH_FROM: tenant-equinix-metal-sjc1
   AKASH_KEYRING_BACKEND: test
 jobs:
-  equinix-metal-ewr1:
+  equinix-metal-sjc1:
     runs-on: ubuntu-20.04
     container:
       image: ghcr.io/ovrclk/e2e-production

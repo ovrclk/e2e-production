@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/avast/retry-go"
@@ -49,6 +50,8 @@ func Execute(rootCmd *cobra.Command) error {
 	ctx := context.Background()
 	ctx = context.WithValue(ctx, client.ClientContextKey, &client.Context{})
 	ctx = context.WithValue(ctx, server.ServerContextKey, srvCtx)
+
+	srvCtx.Config.RPC.TimeoutBroadcastTxCommit = time.Second * 30
 
 	rootCmd.PersistentFlags().String(flags.FlagLogLevel, zerolog.InfoLevel.String(), "The logging level (trace|debug|info|warn|error|fatal|panic)")
 	rootCmd.PersistentFlags().String(flags.FlagLogFormat, tmcfg.LogFormatPlain, "The logging format (json|plain)")
@@ -118,8 +121,6 @@ func main() {
 				return err
 			}
 
-			cctx = cctx.WithBroadcastMode("block")
-
 			if _, err = cutils.LoadAndQueryPEMForAccount(cmd.Context(), cctx, cctx.Keyring); err != nil {
 				if os.IsNotExist(err) {
 					err = errors.Errorf("no certificate file found for account %q.\n"+
@@ -129,34 +130,7 @@ func main() {
 				return err
 			}
 
-			log := logger.With("cli", "cleanup")
-
-			qClient := dtypes.NewQueryClient(cctx)
-
-			params := &dtypes.QueryDeploymentsRequest{
-				Filters: dtypes.DeploymentFilters{
-					Owner: cctx.FromAddress.String(),
-					State: "active",
-				},
-			}
-
-			res, err := qClient.Deployments(ctx, params)
-			if err != nil {
-				log.Error("fetching dangling deployments", "error", err.Error())
-			} else if len(res.Deployments) > 0 {
-				var msgs []sdk.Msg
-				for _, d := range res.Deployments {
-					log.Info("closing dangling deployment", "dseq", d.Deployment.DeploymentID.DSeq)
-
-					msgs = append(msgs, &dtypes.MsgCloseDeployment{
-						ID: d.Deployment.DeploymentID,
-					})
-				}
-
-				if _, e := SendMsgs(ctx, cctx, cmd.Flags(), msgs); e != nil {
-					log.Error("closing deployments", "error", e.Error())
-				}
-			}
+			preRun(ctx, cctx, cmd)
 
 			group, ctx := errgroup.WithContext(ctx)
 
@@ -165,7 +139,7 @@ func main() {
 				return err
 			}
 
-			log = logger.With("cli", "create")
+			log := logger.With("cli", "create")
 
 			dd, err := NewDeploymentData(args[0], cmd.Flags(), cctx)
 			if err != nil {
@@ -183,38 +157,28 @@ func main() {
 					SendManifestHandler(cctx, dd, gClientDir, retryConfiguration))
 				if err != nil && !errors.Is(err, context.Canceled) {
 					log.Error("error watching events", "err", err)
-					cancel()
 				}
+
 				return err
 			})
 
-			depCreated := make(chan error, 1)
+			err = TxCreateDeployment(ctx, cctx, cmd.Flags(), dd)
+			if err != nil {
+				return err
+			}
+
+			wgClosed := sync.WaitGroup{}
 			depTeardown := make(chan struct{}, 1)
 
-			// Send the deployment creation transaction
-			group.Go(func() error {
-				err := TxCreateDeployment(ctx, cctx, cmd.Flags(), dd)
-				if err != nil {
-					cancel()
-				}
-
-				depCreated <- err
-				return err
-			})
+			wgClosed.Add(1)
 
 			defer func() {
 				depTeardown <- struct{}{}
-				<-depCreated
+				wgClosed.Wait()
 			}()
 
 			go func() {
-				defer func() {
-					depCreated <- nil
-				}()
-
-				if e := <-depCreated; e != nil {
-					return
-				}
+				defer wgClosed.Done()
 
 				<-depTeardown
 
@@ -227,10 +191,9 @@ func main() {
 			group.Go(func() error {
 				wfb := newWaitForBids(dd, bids)
 
-				err := wfb.run(ctx, cancel, cctx, cmd.Flags())
+				err := wfb.run(ctx, cctx, cmd.Flags())
 				if err != nil && !errors.Is(err, context.Canceled) {
 					log.Error("error waiting for bids to be made", "err", err)
-					cancel()
 				}
 				return err
 			})
@@ -238,30 +201,22 @@ func main() {
 			wfl := newWaitForLeases(dd, gClientDir, retryConfiguration, leasesReady)
 			// Wait for the leases to be created and then start polling the provider for service availability
 			group.Go(func() error {
-				err := wfl.run(ctx, cancel)
-				if err != nil && !errors.Is(err, context.Canceled) {
-					log.Error("error waiting for services to be ready", "err", err)
-					cancel()
-				}
-				return err
+				wfl.run(ctx)
+
+				return nil
 			})
 
-			// This returns "context cancelled" when everything goes OK
-			err = group.Wait()
-			if err != nil && errors.Is(err, context.Canceled) && wfl.allLeasesOk {
-				err = nil // Not an actual error to stop on
-			}
-
+			err = <- wfl.done
+			cancel()
 			if err != nil {
+				log.Error("error waiting for services to be ready", "err", err)
 				return err
 			}
 
-			// wtf
-			if !wfl.allLeasesOk {
-				return errors.New("timed out waiting for leases")
+			err = group.Wait()
+			if err != nil && !errors.Is(err, context.Canceled) {
+				return err
 			}
-
-			cancel()
 
 			// Reset the context
 			ctx, cancel2 := context.WithDeadline(cmd.Context(), time.Now().Add(timeoutDuration))
@@ -305,7 +260,7 @@ func main() {
 	cmd.PersistentFlags().String(flags.FlagChainID, "", "The network chain ID")
 	cmd.PersistentFlags().String(flags.FlagNode, "tcp://rpc0.mainnet.akash.network:26657", "The node address")
 	cmd.Flags().String(flags.FlagChainID, "", "The network chain ID")
-	cmd.Flags().Duration(FlagTimeout, 300*time.Second, "The max amount of time to wait for deployment status checking process")
+	cmd.Flags().Duration(FlagTimeout, 900*time.Second, "The max amount of time to wait for deployment status checking process")
 	cmd.Flags().Duration(FlagTick, 500*time.Millisecond, "The time interval at which deployment status is checked")
 
 	cmd.PersistentFlags().String(flags.FlagFrom, "", "name or address of private key with which to sign")
@@ -323,6 +278,37 @@ func main() {
 			os.Exit(e.Code)
 		default:
 			os.Exit(1)
+		}
+	}
+}
+
+func preRun(ctx context.Context, cctx client.Context, cmd *cobra.Command) {
+	log := logger.With("cli", "cleanup")
+
+	qClient := dtypes.NewQueryClient(cctx)
+
+	params := &dtypes.QueryDeploymentsRequest{
+		Filters: dtypes.DeploymentFilters{
+			Owner: cctx.FromAddress.String(),
+			State: "active",
+		},
+	}
+
+	res, err := qClient.Deployments(ctx, params)
+	if err != nil {
+		log.Error("fetching dangling deployments", "error", err.Error())
+	} else if len(res.Deployments) > 0 {
+		var msgs []sdk.Msg
+		for _, d := range res.Deployments {
+			log.Info("closing dangling deployment", "dseq", d.Deployment.DeploymentID.DSeq)
+
+			msgs = append(msgs, &dtypes.MsgCloseDeployment{
+				ID: d.Deployment.DeploymentID,
+			})
+		}
+
+		if e := SendMsgs(ctx, cctx, cmd.Flags(), msgs); e != nil {
+			log.Error("closing dangling deployments", "error", e.Error())
 		}
 	}
 }
