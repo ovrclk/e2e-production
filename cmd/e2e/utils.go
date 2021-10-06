@@ -13,6 +13,8 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authclient "github.com/cosmos/cosmos-sdk/x/auth/client"
 	dtypes "github.com/ovrclk/akash/x/deployment/types"
+
+	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 	ttypes "github.com/tendermint/tendermint/types"
 )
@@ -59,7 +61,6 @@ func TxCloseDeployment(ctx context.Context, cctx client.Context, flags *pflag.Fl
 }
 
 func BroadcastTX(ctx context.Context, cctx client.Context, flags *pflag.FlagSet, msgs ...sdk.Msg) error {
-
 	// rewrite of https://github.com/cosmos/cosmos-sdk/blob/ca98fda6eae597b1e7d468f96d030b6d905748d7/client/tx/tx.go#L29
 	// to add continuing retries if broadcast-mode=block fails with a timeout.
 
@@ -100,10 +101,10 @@ func BroadcastTX(ctx context.Context, cctx client.Context, flags *pflag.FlagSet,
 	res, err := doBroadcast(ctx, cctx, broadcastBlockRetryTimeout, txBytes)
 	if err != nil {
 		return err
+
 	}
 
 	return cctx.PrintProto(res)
-
 }
 
 func doBroadcast(ctx context.Context, cctx client.Context, timeout time.Duration, txb ttypes.Tx) (*sdk.TxResponse, error) {
@@ -119,16 +120,17 @@ func doBroadcast(ctx context.Context, cctx client.Context, timeout time.Duration
 	// submit with mode commit/block
 	cres, err := cctx.BroadcastTxCommit(txb)
 
-	switch {
-	case err == nil:
+	if err == nil {
 		// no error, return
+		return cres, nil
+	} else if !strings.HasSuffix(err.Error(), timeoutErrorMessage) {
+		// error other than timeout, return
 		return cres, err
-	case err.Error() != timeoutErrorMessage:
-		// other error, return
-		return cres, err
-	default:
-		// timeout error, continue on to retry
+	} else if cres == nil {
+		return cres, errors.Wrapf(err, "wtf")
 	}
+
+	// timeout error, continue on to retry
 
 	// loop
 	lctx, cancel := context.WithTimeout(ctx, timeout)
