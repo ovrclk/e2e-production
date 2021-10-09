@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -14,7 +15,6 @@ import (
 	authclient "github.com/cosmos/cosmos-sdk/x/auth/client"
 	dtypes "github.com/ovrclk/akash/x/deployment/types"
 
-	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 	ttypes "github.com/tendermint/tendermint/types"
 )
@@ -108,6 +108,13 @@ func BroadcastTX(ctx context.Context, cctx client.Context, flags *pflag.FlagSet,
 }
 
 func doBroadcast(ctx context.Context, cctx client.Context, timeout time.Duration, txb ttypes.Tx) (*sdk.TxResponse, error) {
+	log := logger.With("cli", "doBroadcast")
+
+	// timeout error, continue on to retry
+	hash := hex.EncodeToString(txb.Hash())
+
+	log.Info("broadcasting tx", "txhash", hash)
+
 	switch cctx.BroadcastMode {
 	case flags.BroadcastSync:
 		return cctx.BroadcastTxSync(txb)
@@ -121,16 +128,13 @@ func doBroadcast(ctx context.Context, cctx client.Context, timeout time.Duration
 	cres, err := cctx.BroadcastTxCommit(txb)
 
 	if err == nil {
-		// no error, return
+		// good job
 		return cres, nil
-	} else if !strings.HasSuffix(err.Error(), timeoutErrorMessage) {
-		// error other than timeout, return
-		return cres, err
-	} else if cres == nil {
-		return cres, errors.Wrapf(err, "wtf")
 	}
 
-	// timeout error, continue on to retry
+	if !strings.HasSuffix(err.Error(), timeoutErrorMessage) {
+		return cres, err
+	}
 
 	// loop
 	lctx, cancel := context.WithTimeout(ctx, timeout)
@@ -145,7 +149,7 @@ func doBroadcast(ctx context.Context, cctx client.Context, timeout time.Duration
 		}
 
 		// check transaction
-		res, err := authclient.QueryTx(cctx, cres.TxHash)
+		res, err := authclient.QueryTx(cctx, hash)
 		if err == nil {
 			return res, nil
 		}
