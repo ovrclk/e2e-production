@@ -7,6 +7,8 @@ on:
   schedule:
     - cron: '*/20 * * * *'
 
+concurrency: e2e-equinix-metal-ams1
+
 env:
   AKASH_NODE: ${{secrets.AKASH_NODE}}
   AKASH_CHAIN_ID: akashnet-2
