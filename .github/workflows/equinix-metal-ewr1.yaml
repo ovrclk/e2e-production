@@ -7,6 +7,8 @@ on:
   schedule:
     - cron: '*/20 * * * *'
 
+concurrency: e2e-equinix-metal-ewr1
+
 env:
   AKASH_HOME: /home/runner/.akash
   AKASH_NODE: ${{secrets.AKASH_NODE}}
