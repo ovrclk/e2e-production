@@ -1,11 +1,12 @@
 name: equinix-metal-ewr1
 
 on:
-#  push:
-#    branches:
-#      - master
-  schedule:
-    - cron: '*/20 * * * *'
+  #  push:
+  #    branches:
+  #      - master
+  # schedule:
+  #   - cron: '*/20 * * * *'
+  workflow_dispatch:
 
 env:
   AKASH_HOME: /home/runner/.akash
